@@ -1,0 +1,4 @@
+interface:
+  display_name: "建筑图板排版"
+  short_description: "以证据、叙事、网格、比例、字号层级和输出检查组织建筑展板排版"
+  default_prompt: "使用 $layout-architecture-boards 审查并改进这张建筑图板的叙事、网格、图像比例、文字层级和输出质量。"
