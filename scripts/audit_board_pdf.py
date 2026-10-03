@@ -69,6 +69,18 @@ def command_or_warning(findings: list[Finding], name: str) -> str | None:
     return resolved
 
 
+def parse_page_sizes(output: str) -> list[tuple[int, float, float]]:
+    sizes: list[tuple[int, float, float]] = []
+    pattern = re.compile(
+        r"^Page(?:\s+(\d+))?\s+size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts(?:\s|$)",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(output):
+        page = int(match.group(1) or 1)
+        sizes.append((page, float(match.group(2)), float(match.group(3))))
+    return sizes
+
+
 def inspect_pdfinfo(
     pdf: Path,
     findings: list[Finding],
@@ -94,31 +106,79 @@ def inspect_pdfinfo(
     else:
         add(findings, "WARN", "pages", "could not parse page count")
 
-    size_match = re.search(
-        r"^Page size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts",
-        result.stdout,
-        re.MULTILINE,
-    )
-    if size_match:
-        width_mm = float(size_match.group(1)) / PT_PER_MM
-        height_mm = float(size_match.group(2)) / PT_PER_MM
-        detail = f"{width_mm:.3f} x {height_mm:.3f} mm"
-        if expected_size is not None:
-            width_ok = abs(width_mm - expected_size[0]) <= tolerance_mm
-            height_ok = abs(height_mm - expected_size[1]) <= tolerance_mm
-            if not (width_ok and height_ok):
-                add(
-                    findings,
-                    "FAIL",
-                    "page-size",
-                    f"expected {expected_size[0]:g} x {expected_size[1]:g} mm, found {detail}",
-                )
-            else:
-                add(findings, "PASS", "page-size", detail)
-        else:
-            add(findings, "PASS", "page-size", detail)
-    else:
+    size_output = result.stdout
+    if pages_match and pages > 1:
+        page_result = run([executable, "-f", "1", "-l", str(pages), str(pdf)])
+        if page_result.returncode != 0:
+            add(
+                findings,
+                "WARN",
+                "page-size",
+                page_result.stderr.strip() or "could not inspect every page size",
+            )
+            return
+        size_output = page_result.stdout
+
+    page_sizes = parse_page_sizes(size_output)
+    if not page_sizes:
         add(findings, "WARN", "page-size", "could not parse page size")
+        return
+
+    if pages_match and (
+        len(page_sizes) != pages
+        or [page for page, _, _ in page_sizes] != list(range(1, pages + 1))
+    ):
+        add(
+            findings,
+            "WARN",
+            "page-size",
+            f"could not parse individual sizes for all {pages} page(s)",
+        )
+        return
+
+    if expected_size is None:
+        unique_sizes = list(
+            dict.fromkeys(
+                (round(width / PT_PER_MM, 3), round(height / PT_PER_MM, 3))
+                for _, width, height in page_sizes
+            )
+        )
+        rendered_sizes = ", ".join(
+            f"{width:g} x {height:g} mm" for width, height in unique_sizes
+        )
+        add(findings, "PASS", "page-size", f"{len(page_sizes)} page(s): {rendered_sizes}")
+        return
+
+    mismatches = []
+    for page, width_pts, height_pts in page_sizes:
+        width_mm = width_pts / PT_PER_MM
+        height_mm = height_pts / PT_PER_MM
+        if (
+            abs(width_mm - expected_size[0]) > tolerance_mm
+            or abs(height_mm - expected_size[1]) > tolerance_mm
+        ):
+            mismatches.append(
+                f"page {page}: {width_mm:.3f} x {height_mm:.3f} mm"
+            )
+    if mismatches:
+        details = "; ".join(mismatches[:10])
+        if len(mismatches) > 10:
+            details += f"; and {len(mismatches) - 10} more"
+        add(
+            findings,
+            "FAIL",
+            "page-size",
+            f"expected every page to be {expected_size[0]:g} x {expected_size[1]:g} mm; "
+            f"mismatch(es): {details}",
+        )
+    else:
+        add(
+            findings,
+            "PASS",
+            "page-size",
+            f"all {len(page_sizes)} page(s) are within {tolerance_mm:g} mm of "
+            f"{expected_size[0]:g} x {expected_size[1]:g} mm",
+        )
 
 
 def inspect_qpdf(pdf: Path, findings: list[Finding]) -> None:
