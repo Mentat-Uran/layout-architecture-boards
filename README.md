@@ -12,3 +12,12 @@ This package distinguishes project evidence, generic references, author
 analysis, design proposals, and unresolved items. It does not authorize
 formal drawing or submission output by itself; project-specific instructions,
 human review, and printer requirements remain authoritative.
+
+## Test the PDF audit script
+
+The audit script requires Python 3.10+ and uses only the standard library.
+Run its regression tests from the repository root with:
+
+```bash
+python3 -m unittest discover -v
+```
