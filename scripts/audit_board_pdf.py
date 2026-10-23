@@ -70,6 +70,14 @@ def command_or_warning(findings: list[Finding], name: str) -> str | None:
 
 
 def parse_page_sizes(output: str) -> list[tuple[int, float, float]]:
+    rotations = {
+        int(match.group(1) or 1): int(match.group(2)) % 360
+        for match in re.finditer(
+            r"^Page(?:\s+(\d+))?\s+rot:\s*(-?\d+)\s*$",
+            output,
+            re.MULTILINE,
+        )
+    }
     sizes: list[tuple[int, float, float]] = []
     pattern = re.compile(
         r"^Page(?:\s+(\d+))?\s+size:\s+([0-9.]+)\s+x\s+([0-9.]+)\s+pts(?:\s|$)",
@@ -77,7 +85,11 @@ def parse_page_sizes(output: str) -> list[tuple[int, float, float]]:
     )
     for match in pattern.finditer(output):
         page = int(match.group(1) or 1)
-        sizes.append((page, float(match.group(2)), float(match.group(3))))
+        width = float(match.group(2))
+        height = float(match.group(3))
+        if rotations.get(page, 0) in (90, 270):
+            width, height = height, width
+        sizes.append((page, width, height))
     return sizes
 
 

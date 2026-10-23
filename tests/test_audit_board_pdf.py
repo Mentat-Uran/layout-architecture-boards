@@ -17,6 +17,23 @@ Page    2 size: 841.89 x 595.28 pts (A4)
             [(1, 595.28, 841.89), (1, 595.28, 841.89), (2, 841.89, 595.28)],
         )
 
+    def test_applies_page_rotation_before_returning_dimensions(self):
+        output = """Page    1 size: 841.89 x 595.28 pts (A4)
+Page    1 rot: 0
+Page    2 size: 595.28 x 841.89 pts (A4)
+Page    2 rot: 90
+Page    3 size: 595.28 x 841.89 pts (A4)
+Page    3 rot: 270
+"""
+        self.assertEqual(
+            parse_page_sizes(output),
+            [
+                (1, 841.89, 595.28),
+                (2, 841.89, 595.28),
+                (3, 841.89, 595.28),
+            ],
+        )
+
 
 class InspectPdfInfoTests(unittest.TestCase):
     def test_fails_when_a_later_page_has_the_wrong_size(self):
@@ -72,6 +89,37 @@ class InspectPdfInfoTests(unittest.TestCase):
         size_finding = next(finding for finding in findings if finding.check == "page-size")
         self.assertEqual(size_finding.level, "PASS")
         self.assertIn("all 1 page(s)", size_finding.detail)
+
+    def test_accepts_landscape_extent_for_a_rotated_portrait_cropbox(self):
+        default_info = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="Pages: 2\nPage size: 841.89 x 595.28 pts (A4)\nPage rot: 0\n",
+            stderr="",
+        )
+        per_page_info = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "Pages: 2\n"
+                "Page    1 size: 841.89 x 595.28 pts (A4)\n"
+                "Page    1 rot: 0\n"
+                "Page    2 size: 595.28 x 841.89 pts (A4)\n"
+                "Page    2 rot: 90\n"
+            ),
+            stderr="",
+        )
+        findings: list[Finding] = []
+
+        with (
+            patch("scripts.audit_board_pdf.shutil.which", return_value="/usr/bin/pdfinfo"),
+            patch("scripts.audit_board_pdf.run", side_effect=[default_info, per_page_info]),
+        ):
+            inspect_pdfinfo(Path("board.pdf"), findings, 2, (297, 210), 0.5)
+
+        size_finding = next(finding for finding in findings if finding.check == "page-size")
+        self.assertEqual(size_finding.level, "PASS")
+        self.assertIn("all 2 page(s)", size_finding.detail)
 
 
 if __name__ == "__main__":
